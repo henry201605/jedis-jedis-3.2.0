@@ -51,6 +51,7 @@ public abstract class JedisClusterConnectionHandler implements Closeable {
     for (HostAndPort hostAndPort : startNodes) {
       Jedis jedis = null;
       try {
+        // 获取一个Jedis 实例
         jedis = new Jedis(hostAndPort.getHost(), hostAndPort.getPort(), connectionTimeout, soTimeout, ssl, sslSocketFactory, sslParameters, hostnameVerifier);
         if (password != null) {
           jedis.auth(password);
@@ -58,7 +59,9 @@ public abstract class JedisClusterConnectionHandler implements Closeable {
         if (clientName != null) {
           jedis.clientSetname(clientName);
         }
+        // 获取Redis 节点和Slot 虚拟槽
         cache.discoverClusterNodesAndSlots(jedis);
+        // 直接跳出循环
         break;
       } catch (JedisConnectionException e) {
         // try next nodes

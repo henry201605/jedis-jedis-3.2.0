@@ -128,13 +128,16 @@ public class JedisSentinelPool extends JedisPoolAbstract {
 
   private void initPool(HostAndPort master) {
     synchronized(initPoolLock){
+      //master与currentHostMaster比较，master没有改变则不需要initPool
       if (!master.equals(currentHostMaster)) {
         currentHostMaster = master;
+        //首次调用，实例化Jedis工厂
         if (factory == null) {
           factory = new JedisFactory(master.getHost(), master.getPort(), connectionTimeout,
               soTimeout, password, database, clientName);
           initPool(poolConfig, factory);
         } else {
+          //非首次调用，修改工厂设置
           factory.setHostAndPort(currentHostMaster);
           // although we clear the pool, we still have to check the
           // returned object
@@ -148,20 +151,24 @@ public class JedisSentinelPool extends JedisPoolAbstract {
     }
   }
 
+
   private HostAndPort initSentinels(Set<String> sentinels, final String masterName) {
 
     HostAndPort master = null;
     boolean sentinelAvailable = false;
 
     log.info("Trying to find master from available Sentinels...");
-
+    // 有多个sentinels,遍历这些个sentinels
     for (String sentinel : sentinels) {
+
+      // host:port 表示的sentinel 地址转化为一个HostAndPort 对象。
       final HostAndPort hap = HostAndPort.parseString(sentinel);
 
       log.debug("Connecting to Sentinel {}", hap);
 
       Jedis jedis = null;
       try {
+        // 连接到sentinel
         jedis = new Jedis(hap.getHost(), hap.getPort(), sentinelConnectionTimeout, sentinelSoTimeout);
         if (sentinelPassword != null) {
           jedis.auth(sentinelPassword);
@@ -169,7 +176,7 @@ public class JedisSentinelPool extends JedisPoolAbstract {
         if (sentinelClientName != null) {
           jedis.clientSetname(sentinelClientName);
         }
-
+        // 根据masterName 得到master 的地址，返回一个list，host= list[0], port =// list[1]
         List<String> masterAddr = jedis.sentinelGetMasterAddrByName(masterName);
 
         // connected to sentinel...
@@ -179,7 +186,7 @@ public class JedisSentinelPool extends JedisPoolAbstract {
           log.warn("Can not get master addr, master name: {}. Sentinel: {}", masterName, hap);
           continue;
         }
-
+        // 如果在任何一个sentinel 中找到了master，不再遍历sentinels
         master = toHostAndPort(masterAddr);
         log.debug("Found Redis master at {}", master);
         break;
@@ -195,7 +202,8 @@ public class JedisSentinelPool extends JedisPoolAbstract {
         }
       }
     }
-
+    // 到这里，如果master 为null，则说明有两种情况，一种是所有的sentinels节点都down掉了，一种是master
+    //节点没有被存活的sentinels 监控到
     if (master == null) {
       if (sentinelAvailable) {
         // can connect to sentinel, but master name seems to not
@@ -207,15 +215,21 @@ public class JedisSentinelPool extends JedisPoolAbstract {
             + masterName + " master is running...");
       }
     }
-
+    // 如果走到这里，说明找到了master 的地址
     log.info("Redis master running at " + master + ", starting Sentinel listeners...");
 
+    // 启动对每个sentinels 的监听为每个sentinel 都启动了一个监听者MasterListener。MasterListener 本身是一个线
+//    程，它会去订阅sentinel 上关于master 节点地址改变的消息。
     for (String sentinel : sentinels) {
       final HostAndPort hap = HostAndPort.parseString(sentinel);
+      // 创建 master 监听器线程
       MasterListener masterListener = new MasterListener(masterName, hap.getHost(), hap.getPort());
       // whether MasterListener threads are alive or not, process can be stopped
+      // 后台线程
       masterListener.setDaemon(true);
+      // 添加到监听集合，后期优雅关闭
       masterListeners.add(masterListener);
+      // 启动线程
       masterListener.start();
     }
 
@@ -299,17 +313,19 @@ public class JedisSentinelPool extends JedisPoolAbstract {
 
       running.set(true);
 
+      // 死循环
       while (running.get()) {
-
+        //创建一个 Jedis对象(Sentinel)
         j = new Jedis(host, port);
 
         try {
+          // 继续检查
           // double check that it is not being shutdown
           if (!running.get()) {
             break;
           }
-
           // code for active refresh
+//          根据masterName 得到master 的地址，返回一个list，host= list[0], port =// list[1]
           List<String> masterAddr = j.sentinelGetMasterAddrByName(masterName);
           if (masterAddr == null || masterAddr.size() != 2) {
             log.warn("Can not get master addr, master name: {}. Sentinel: {}:{}.", masterName, host, port);
@@ -317,16 +333,20 @@ public class JedisSentinelPool extends JedisPoolAbstract {
             initPool(toHostAndPort(masterAddr));
           }
 
+          // jedis 对象，通过 Redis pub/sub 订阅 switch-master 主题
+          //订阅sentinel上关于master地址改变的消息
           j.subscribe(new JedisPubSub() {
             @Override
             public void onMessage(String channel, String message) {
               log.debug("Sentinel {}:{} published: {}.", host, port, message);
-
+              // 分割字符串
               String[] switchMasterMsg = message.split(" ");
-
+              // 如果长度大于3
               if (switchMasterMsg.length > 3) {
 
+                // 且第一个字符串的名称和当前 masterName 发生了 switch
                 if (masterName.equals(switchMasterMsg[0])) {
+                  // 重新初始化连接池（第 4 个和 第 5 个）
                   initPool(toHostAndPort(Arrays.asList(switchMasterMsg[3], switchMasterMsg[4])));
                 } else {
                   log.debug(
@@ -343,11 +363,12 @@ public class JedisSentinelPool extends JedisPoolAbstract {
           }, "+switch-master");
 
         } catch (JedisException e) {
-
+          // 如果连接异常
           if (running.get()) {
             log.error("Lost connection to Sentinel at {}:{}. Sleeping 5000ms and retrying.", host,
               port, e);
             try {
+              // 默认休息 5 秒
               Thread.sleep(subscribeRetryWaitTimeMillis);
             } catch (InterruptedException e1) {
               log.error("Sleep interrupted: ", e1);

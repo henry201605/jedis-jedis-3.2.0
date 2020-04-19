@@ -70,28 +70,38 @@ public class JedisClusterInfoCache {
 
     try {
       reset();
+      //根据当前redis实例，获取集群中master,slave节点信息。包括每个master节点 上分配的数据嘈
       List<Object> slots = jedis.clusterSlots();
 
+      // 遍历master 节点
       for (Object slotInfoObj : slots) {
+        // slotInfo 槽开始，槽结束，主，从
         List<Object> slotInfo = (List<Object>) slotInfoObj;
 
+        // 如果<=2，代表没有分配slot
         if (slotInfo.size() <= MASTER_NODE_INDEX) {
           continue;
         }
 
+        // 获取分配到当前master 节点的数据槽，例如6373 节点的{0,1,2,3……5460}
         List<Integer> slotNums = getAssignedSlotArray(slotInfo);
 
         // hostInfos
+        // size 是4，依次为槽最小（0）、最大（1），主（2），从（3）
         int size = slotInfo.size();
+        // 第3 位和第4 位是主从端口的信息
         for (int i = MASTER_NODE_INDEX; i < size; i++) {
           List<Object> hostInfos = (List<Object>) slotInfo.get(i);
           if (hostInfos.size() <= 0) {
             continue;
           }
-
+          // 根据IP 端口生成HostAndPort 实例
           HostAndPort targetNode = generateHostAndPort(hostInfos);
+          // 据HostAndPort 解析出ip:port 的key 值，再根据key 从缓存中查询对应的jedisPool 实例。如果没有jedisPool
+//          实例，就创建JedisPool 实例，最后放入缓存中。nodeKey 和nodePool 的关系
           setupNodeIfNotExist(targetNode);
           if (i == MASTER_NODE_INDEX) {
+            // 把slot和jedisPool缓存起来（16384 个），key 是slot 下标，value 是连接池
             assignSlotsToNode(slotNums, targetNode);
           }
         }

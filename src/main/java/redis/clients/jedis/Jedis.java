@@ -3011,7 +3011,7 @@ public class Jedis extends BinaryJedis implements JedisCommands, MultiKeyCommand
    *    22) "2"
    *    23) "quorum"
    *    24) "2"
-   * 
+   *
    * </pre>
    * @return
    */
@@ -3037,6 +3037,7 @@ public class Jedis extends BinaryJedis implements JedisCommands, MultiKeyCommand
    * @param masterName
    * @return two elements list of strings : host and port.
    */
+  //从哨兵节点获取master信息的方法
   @Override
   public List<String> sentinelGetMasterAddrByName(final String masterName) {
     client.sentinel(Protocol.SENTINEL_GET_MASTER_ADDR_BY_NAME, masterName);
